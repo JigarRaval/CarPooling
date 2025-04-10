@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { ArrowRight, Smartphone, Shield, Clock } from "lucide-react";
 import { Button } from "../components/index";
-import logo from "/uber_logo.png";
+import logo from "/logo.png";
 import { useNavigate } from "react-router-dom";
 
 // Modern background video (fallback to image)
@@ -50,7 +50,7 @@ function GetStarted() {
         <header className="px-6 pt-8 sm:px-10 sm:pt-12 flex justify-between items-center">
           <img
             src={logo}
-            alt="Uber Logo"
+            alt="Car-Pooling Logo"
             className="h-10 w-auto sm:h-12 brightness-0 invert drop-shadow-md"
           />
           <a
