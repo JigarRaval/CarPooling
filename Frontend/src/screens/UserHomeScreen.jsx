@@ -1,440 +1,437 @@
-import React, { useContext, useEffect, useState, useCallback } from "react";
+import React, { useCallback, useContext, useEffect, useState } from "react";
+import { useUser } from "../contexts/UserContext";
+import map from "/map.png";
+import {
+  Button,
+  LocationSuggestions,
+  SelectVehicle,
+  RideDetails,
+  Sidebar,
+} from "../components";
 import axios from "axios";
-import { useCaptain } from "../contexts/CaptainContext";
-import { Phone, User, MapPin, Car, Bike, Clock, Calendar } from "lucide-react";
+import debounce from "lodash.debounce";
 import { SocketDataContext } from "../contexts/SocketContext";
-import { NewRide, Sidebar } from "../components";
-import { motion, AnimatePresence } from "framer-motion";
 
-const defaultRideData = {
-  user: {
-    fullname: {
-      firstname: "No",
-      lastname: "User",
-    },
-    _id: "",
-    email: "example@gmail.com",
-    rides: [],
-  },
-  pickup: "Place, City, State, Country",
-  destination: "Place, City, State, Country",
-  fare: 0,
-  vehicle: "car",
-  status: "pending",
-  duration: 0,
-  distance: 0,
-  _id: "123456789012345678901234",
-};
-
-function CaptainHomeScreen() {
-  const token = localStorage.getItem("token");
-  const { captain } = useCaptain();
+function UserHomeScreen() {
+  const token = localStorage.getItem("token"); // this token is in use
   const { socket } = useContext(SocketDataContext);
-  const [loading, setLoading] = useState(false);
-
-  const [riderLocation, setRiderLocation] = useState({
-    ltd: null,
-    lng: null,
-  });
-  const [mapLocation, setMapLocation] = useState("");
-  const [earnings, setEarnings] = useState({
-    total: 0,
-    today: 0,
-    weekly: 0,
-  });
-
-  const [rides, setRides] = useState({
-    accepted: 0,
-    cancelled: 0,
-    distanceTravelled: 0,
-    averageRating: 0,
-  });
-
-  const [newRide, setNewRide] = useState(
-    JSON.parse(localStorage.getItem("rideDetails")) || defaultRideData
-  );
-  const [otp, setOtp] = useState("");
+  const { user } = useUser();
   const [messages, setMessages] = useState(
     JSON.parse(localStorage.getItem("messages")) || []
   );
+  const [loading, setLoading] = useState(false);
+  const [selectedInput, setSelectedInput] = useState("pickup");
+  const [locationSuggestion, setLocationSuggestion] = useState([]);
+  const [mapLocation, setMapLocation] = useState("");
+  const [rideCreated, setRideCreated] = useState(false);
+
+  // Ride details
+  const [pickupLocation, setPickupLocation] = useState("");
+  const [destinationLocation, setDestinationLocation] = useState("");
+  const [selectedVehicle, setSelectedVehicle] = useState("car");
+  const [fare, setFare] = useState({
+    auto: 0,
+    car: 0,
+    bike: 0,
+  });
+  const [confirmedRideData, setConfirmedRideData] = useState(null);
 
   // Panels
-  const [showCaptainDetailsPanel, setShowCaptainDetailsPanel] = useState(true);
-  const [showNewRidePanel, setShowNewRidePanel] = useState(
-    JSON.parse(localStorage.getItem("showPanel")) || false
-  );
-  const [showBtn, setShowBtn] = useState(
-    JSON.parse(localStorage.getItem("showBtn")) || "accept"
-  );
-  const [isOnline, setIsOnline] = useState(true);
+  const [showFindTripPanel, setShowFindTripPanel] = useState(true);
+  const [showSelectVehiclePanel, setShowSelectVehiclePanel] = useState(false);
+  const [showRideDetailsPanel, setShowRideDetailsPanel] = useState(false);
 
-  // Memoized functions
-  const updateLocation = useCallback(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords;
-          setRiderLocation({ ltd: latitude, lng: longitude });
-          setMapLocation(
-            `https://www.google.com/maps/embed/v1/view?key=${
-              import.meta.env.VITE_GMAPS_KEY
-            }&center=${latitude},${longitude}&zoom=15`
+  const handleLocationChange = useCallback(
+    debounce(async (inputValue, token) => {
+      if (inputValue.length >= 3) {
+        try {
+          const response = await axios.get(
+            `${
+              import.meta.env.VITE_SERVER_URL
+            }/map/get-suggestions?input=${inputValue}`,
+            {
+              headers: {
+                token: token,
+              },
+            }
           );
-
-          if (isOnline && captain._id) {
-            socket.emit("update-location-captain", {
-              userId: captain._id,
-              location: { ltd: latitude, lng: longitude },
-            });
-          }
-        },
-        (error) => {
-          console.error("Location error:", error);
-          // Fallback to default location
-          setMapLocation(
-            `https://www.google.com/maps/embed/v1/view?key=${
-              import.meta.env.VITE_GMAPS_KEY
-            }&center=28.6139,77.2090&zoom=12`
-          );
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    }
-  }, [captain, isOnline, socket]);
-
-  const calculateEarnings = useCallback(() => {
-    let stats = {
-      total: 0,
-      today: 0,
-      weekly: 0,
-      accepted: 0,
-      cancelled: 0,
-      distanceTravelled: 0,
-      ratingSum: 0,
-    };
-
-    const today = new Date();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(today.getDate() - 7);
-
-    captain.rides.forEach((ride) => {
-      const rideDate = new Date(ride.updatedAt);
-
-      if (ride.status === "completed") {
-        stats.accepted++;
-        stats.distanceTravelled += ride.distance;
-        stats.total += ride.fare;
-        stats.ratingSum += ride.rating || 0;
-
-        // Today's earnings
-        if (
-          rideDate.getDate() === today.getDate() &&
-          rideDate.getMonth() === today.getMonth() &&
-          rideDate.getFullYear() === today.getFullYear()
-        ) {
-          stats.today += ride.fare;
+          console.log(response);
+          setLocationSuggestion(response.data);
+        } catch (error) {
+          console.log(error);
         }
-
-        // Weekly earnings
-        if (rideDate >= weekAgo) {
-          stats.weekly += ride.fare;
-        }
-      } else if (ride.status === "cancelled") {
-        stats.cancelled++;
       }
-    });
+    }, 500),
+    []
+  );
 
-    setEarnings({
-      total: stats.total,
-      today: stats.today,
-      weekly: stats.weekly,
-    });
+  const onChangeHandler = (e) => {
+    setSelectedInput(e.target.id);
+    const value = e.target.value;
+    if (e.target.id == "pickup") {
+      setPickupLocation(value);
+    } else if (e.target.id == "destination") {
+      setDestinationLocation(value);
+    }
 
-    setRides({
-      accepted: stats.accepted,
-      cancelled: stats.cancelled,
-      distanceTravelled: Math.round(stats.distanceTravelled / 1000),
-      averageRating:
-        stats.accepted > 0 ? (stats.ratingSum / stats.accepted).toFixed(1) : 0,
-    });
-  }, [captain]);
+    // handleLocationChange(value, token);
 
-  // API Calls
-  const acceptRide = async () => {
+    if (e.target.value.length < 3) {
+      setLocationSuggestion([]);
+    }
+  };
+
+  const getDistanceAndFare = async (pickupLocation, destinationLocation) => {
+    console.log(pickupLocation, destinationLocation);
+    try {
+      setLoading(true);
+      setMapLocation(
+        `https://www.google.com/maps?q=${pickupLocation} to ${destinationLocation}&output=embed`
+      );
+      const response = await axios.get(
+        `${
+          import.meta.env.VITE_SERVER_URL
+        }/ride/get-fare?pickup=${pickupLocation}&destination=${destinationLocation}`,
+        {
+          headers: {
+            token: token,
+          },
+        }
+      );
+      console.log(response);
+      setFare(response.data.fare);
+
+      setShowFindTripPanel(false);
+      setShowSelectVehiclePanel(true);
+      setLocationSuggestion([]);
+      setLoading(false);
+    } catch (error) {
+      console.log(error);
+      setLoading(false);
+    }
+  };
+
+  const createRide = async () => {
     try {
       setLoading(true);
       const response = await axios.post(
-        `${import.meta.env.VITE_SERVER_URL}/ride/confirm`,
-        { rideId: newRide._id },
-        { headers: { token } }
+        `${import.meta.env.VITE_SERVER_URL}/ride/create`,
+        {
+          pickup: pickupLocation,
+          destination: destinationLocation,
+          vehicleType: selectedVehicle,
+        },
+        {
+          headers: {
+            token: token,
+          },
+        }
       );
-
-      setShowBtn("otp");
-      setMapLocation(
-        `https://www.google.com/maps/embed/v1/directions?key=${
-          import.meta.env.VITE_GMAPS_KEY
-        }&origin=${riderLocation.ltd},${riderLocation.lng}&destination=${
-          newRide.pickup
-        }&mode=driving`
-      );
-    } catch (err) {
-      console.error("Accept ride error:", err);
-    } finally {
+      console.log(response);
+      const rideData = {
+        pickup: pickupLocation,
+        destination: destinationLocation,
+        vehicleType: selectedVehicle,
+        fare: fare,
+        confirmedRideData: confirmedRideData,
+        _id: response.data._id,
+      };
+      localStorage.setItem("rideDetails", JSON.stringify(rideData));
+      setLoading(false);
+      setRideCreated(true);
+    } catch (error) {
+      console.log(error);
       setLoading(false);
     }
   };
 
-  const verifyOTP = async () => {
-    try {
-      if (otp.length === 6) {
-        setLoading(true);
-        await axios.get(
-          `${import.meta.env.VITE_SERVER_URL}/ride/start-ride?rideId=${
-            newRide._id
-          }&otp=${otp}`,
-          { headers: { token } }
-        );
-
-        setShowBtn("end-ride");
-        setMapLocation(
-          `https://www.google.com/maps/embed/v1/directions?key=${
-            import.meta.env.VITE_GMAPS_KEY
-          }&origin=${riderLocation.ltd},${riderLocation.lng}&destination=${
-            newRide.destination
-          }&mode=driving`
-        );
-      }
-    } catch (err) {
-      console.error("OTP verification error:", err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const endRide = async () => {
+  const cancelRide = async () => {
+    const rideDetails = JSON.parse(localStorage.getItem("rideDetails"));
     try {
       setLoading(true);
-      await axios.post(
-        `${import.meta.env.VITE_SERVER_URL}/ride/end-ride`,
-        { rideId: newRide._id },
-        { headers: { token } }
+      const response = await axios.get(
+        `${import.meta.env.VITE_SERVER_URL}/ride/cancel?rideId=${
+          rideDetails._id || rideDetails.confirmedRideData._id
+        }`,
+        {
+          pickup: pickupLocation,
+          destination: destinationLocation,
+          vehicleType: selectedVehicle,
+        },
+        {
+          headers: {
+            token: token,
+          },
+        }
       );
-
-      // Reset state
-      setShowBtn("accept");
-      setShowCaptainDetailsPanel(true);
-      setShowNewRidePanel(false);
-      setNewRide(defaultRideData);
-      localStorage.removeItem("rideDetails");
-      localStorage.removeItem("showPanel");
+      setLoading(false);
       updateLocation();
-    } catch (err) {
-      console.error("End ride error:", err);
-    } finally {
+      setShowRideDetailsPanel(false);
+      setShowSelectVehiclePanel(false);
+      setShowFindTripPanel(true);
+      setDefaults();
+      localStorage.removeItem("rideDetails");
+      localStorage.removeItem("panelDetails");
+      localStorage.removeItem("messages");
+      localStorage.removeItem("showPanel");
+      localStorage.removeItem("showBtn");
+    } catch (error) {
+      console.log(error);
       setLoading(false);
     }
   };
+  // Set ride details to default values
+  const setDefaults = () => {
+    setPickupLocation("");
+    setDestinationLocation("");
+    setSelectedVehicle("car");
+    setFare({
+      auto: 0,
+      car: 0,
+      bike: 0,
+    });
+    setConfirmedRideData(null);
+    setRideCreated(false);
+  };
 
-  // Effects
-  useEffect(() => {
-    if (captain._id) {
-      socket.emit("join", { userId: captain._id, userType: "captain" });
-      updateLocation();
-
-      const locationInterval = setInterval(updateLocation, 30000);
-      return () => clearInterval(locationInterval);
+  // Update Location
+  const updateLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setMapLocation(
+            `https://www.google.com/maps?q=${position.coords.latitude},${position.coords.longitude}&output=embed`
+          );
+        },
+        (error) => {
+          console.error("Error fetching position:", error);
+          switch (error.code) {
+            case error.PERMISSION_DENIED:
+              console.error("User denied the request for Geolocation.");
+              break;
+            case error.POSITION_UNAVAILABLE:
+              console.error("Location information is unavailable.");
+              break;
+            case error.TIMEOUT:
+              console.error("The request to get user location timed out.");
+              break;
+            default:
+              console.error("An unknown error occurred.");
+          }
+        }
+      );
     }
-  }, [captain, updateLocation, socket]);
-
+  };
   useEffect(() => {
-    socket.on("new-ride", (data) => {
-      setShowBtn("accept");
-      setNewRide(data);
-      setShowNewRidePanel(true);
+    updateLocation();
+  }, []);
+
+  // Socket Events
+  useEffect(() => {
+    if (user._id) {
+      socket.emit("join", {
+        userId: user._id,
+        userType: "user",
+      });
+    }
+
+    socket.on("ride-confirmed", (data) => {
+      console.log("Ride Confirmed");
+      console.log(data.captain.location);
+      setMapLocation(
+        `https://www.google.com/maps?q=${data.captain.location.ltd},${data.captain.location.lng} to ${pickupLocation}&output=embed`
+      );
+      setConfirmedRideData(data);
     });
 
-    socket.on("ride-cancelled", () => {
-      setShowBtn("accept");
-      setShowCaptainDetailsPanel(true);
-      setShowNewRidePanel(false);
-      setNewRide(defaultRideData);
+    socket.on("ride-started", (data) => {
+      console.log("Ride started");
+      setMapLocation(
+        `https://www.google.com/maps?q=${data.pickup} to ${data.destination}&output=embed`
+      );
+    });
+
+    socket.on("ride-ended", (data) => {
+      console.log("Ride Ended");
+      setShowRideDetailsPanel(false);
+      setShowSelectVehiclePanel(false);
+      setShowFindTripPanel(true);
+      setDefaults();
       localStorage.removeItem("rideDetails");
-      localStorage.removeItem("showPanel");
-      updateLocation();
+      localStorage.removeItem("panelDetails");
+
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            setMapLocation(
+              `https://www.google.com/maps?q=${position.coords.latitude},${position.coords.longitude}&output=embed`
+            );
+          },
+          (error) => {
+            console.error("Error fetching position:", error);
+          }
+        );
+      }
     });
+  }, [user]);
 
-    return () => {
-      socket.off("new-ride");
-      socket.off("ride-cancelled");
-    };
-  }, [socket, updateLocation]);
-
+  // Get ride details
   useEffect(() => {
-    calculateEarnings();
-  }, [captain, calculateEarnings]);
+    const storedRideDetails = localStorage.getItem("rideDetails");
+    const storedPanelDetails = localStorage.getItem("panelDetails");
+
+    if (storedRideDetails) {
+      const ride = JSON.parse(storedRideDetails);
+      setPickupLocation(ride.pickup);
+      setDestinationLocation(ride.destination);
+      setSelectedVehicle(ride.vehicleType);
+      setFare(ride.fare);
+      setConfirmedRideData(ride.confirmedRideData);
+    }
+
+    if (storedPanelDetails) {
+      const panels = JSON.parse(storedPanelDetails);
+      setShowFindTripPanel(panels.showFindTripPanel);
+      setShowSelectVehiclePanel(panels.showSelectVehiclePanel);
+      setShowRideDetailsPanel(panels.showRideDetailsPanel);
+    }
+  }, []);
+
+  // Store Ride Details
+  useEffect(() => {
+    const rideData = {
+      pickup: pickupLocation,
+      destination: destinationLocation,
+      vehicleType: selectedVehicle,
+      fare: fare,
+      confirmedRideData: confirmedRideData,
+    };
+    localStorage.setItem("rideDetails", JSON.stringify(rideData));
+  }, [
+    pickupLocation,
+    destinationLocation,
+    selectedVehicle,
+    fare,
+    confirmedRideData,
+  ]);
+
+  // Store panel information
+  useEffect(() => {
+    const panelDetails = {
+      showFindTripPanel,
+      showSelectVehiclePanel,
+      showRideDetailsPanel,
+    };
+    localStorage.setItem("panelDetails", JSON.stringify(panelDetails));
+  }, [showFindTripPanel, showSelectVehiclePanel, showRideDetailsPanel]);
 
   useEffect(() => {
     localStorage.setItem("messages", JSON.stringify(messages));
-    localStorage.setItem("rideDetails", JSON.stringify(newRide));
-    localStorage.setItem("showPanel", JSON.stringify(showNewRidePanel));
-    localStorage.setItem("showBtn", JSON.stringify(showBtn));
-  }, [messages, newRide, showNewRidePanel, showBtn]);
+  }, [messages]);
 
   useEffect(() => {
-    if (newRide._id) {
-      socket.emit("join-room", newRide._id);
-      socket.on("receiveMessage", (msg) => {
-        setMessages((prev) => [...prev, { msg, by: "other" }]);
-      });
+    socket.emit("join-room", confirmedRideData?._id);
 
-      return () => socket.off("receiveMessage");
-    }
-  }, [newRide, socket]);
+    socket.on("receiveMessage", (msg) => {
+      setMessages((prev) => [...prev, { msg, by: "other" }]);
+    });
 
+    return () => {
+      socket.off("receiveMessage");
+    };
+  }, [confirmedRideData]);
   return (
-    <div className="relative w-full h-dvh bg-gray-100">
+    <div
+      className="relative w-full h-dvh bg-contain"
+      style={{ backgroundImage: `url(${map})` }}
+    >
       <Sidebar />
-
-      {/* Online Status Toggle */}
-      <div className="absolute top-4 right-4 z-20 bg-white p-2 rounded-full shadow-md">
-        <label className="relative inline-flex items-center cursor-pointer">
-          <input
-            type="checkbox"
-            className="sr-only peer"
-            checked={isOnline}
-            onChange={() => setIsOnline(!isOnline)}
-          />
-          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-500"></div>
-          <span className="ml-2 text-sm font-medium text-gray-700">
-            {isOnline ? "Online" : "Offline"}
-          </span>
-        </label>
-      </div>
-
-      {/* Map */}
-      <div className="absolute inset-0 z-0">
-        <iframe
-          src={mapLocation}
-          className="w-full h-full"
-          allowFullScreen
-          loading="lazy"
-          referrerPolicy="strict-origin-when-cross-origin"
-          title="Captain Map View"
-        />
-      </div>
-
-      {/* Captain Details Panel */}
-      <AnimatePresence>
-        {showCaptainDetailsPanel && (
-          <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
-            transition={{ type: "spring", damping: 25 }}
-            className="absolute bottom-0 left-0 right-0 z-10 bg-white rounded-t-3xl shadow-xl p-6"
-          >
-            <div className="flex justify-between items-start mb-6">
-              <div className="flex items-center gap-4">
-                <div className="w-14 h-14 rounded-full bg-blue-500 flex items-center justify-center text-white text-xl font-bold">
-                  {captain?.fullname?.firstname?.[0]}
-                  {captain?.fullname?.lastname?.[0]}
-                </div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800">
-                    {captain?.fullname?.firstname} {captain?.fullname?.lastname}
-                  </h2>
-                  <p className="text-sm text-gray-500 flex items-center gap-1">
-                    <Phone size={14} />
-                    {captain?.phone}
-                  </p>
-                </div>
-              </div>
-
-              <div className="text-right">
-                <p className="text-xs text-gray-500">Today's Earnings</p>
-                <p className="text-xl font-bold text-green-600">
-                  ₹{earnings.today.toLocaleString()}
-                </p>
-              </div>
+      <iframe
+        src={mapLocation}
+        className="absolute map w-full h-[120vh]"
+        allowFullScreen={true}
+        loading="lazy"
+        referrerPolicy="no-referrer-when-downgrade"
+      ></iframe>
+      {/* Find a trip component */}
+      {showFindTripPanel && (
+        <div className="absolute b-0 flex flex-col justify-start p-4 pb-2 gap-4 rounded-b-lg bg-white h-fit w-full">
+          <h1 className="text-2xl font-semibold">Find a trip</h1>
+          <div className="flex items-center relative w-full h-fit">
+            <div className="h-3/5 w-[3px] flex flex-col items-center justify-between bg-black rounded-full absolute mx-5">
+              <div className="w-2 h-2 rounded-full border-[3px]  bg-white border-black"></div>
+              <div className="w-2 h-2 rounded-sm border-[3px]  bg-white border-black"></div>
             </div>
-
-            {/* Stats Cards */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              <StatCard
-                value={rides.accepted}
-                label="Rides"
-                icon={<Car size={16} />}
-                color="bg-blue-100 text-blue-600"
+            <div>
+              <input
+                id="pickup"
+                placeholder="Add a pick-up location"
+                className="w-full bg-zinc-100 pl-10 pr-4 py-3 rounded-lg outline-black text-sm mb-2 truncate"
+                value={pickupLocation}
+                onChange={onChangeHandler}
+                autoComplete="off"
               />
-              <StatCard
-                value={rides.distanceTravelled}
-                label="Km"
-                icon={<MapPin size={16} />}
-                color="bg-green-100 text-green-600"
-              />
-              <StatCard
-                value={rides.averageRating}
-                label="Rating"
-                icon={<Star size={16} />}
-                color="bg-yellow-100 text-yellow-600"
+              <input
+                id="destination"
+                placeholder="Add a drop-off location"
+                className="w-full bg-zinc-100 pl-10 pr-4 py-3 rounded-lg outline-black text-sm truncate"
+                value={destinationLocation}
+                onChange={onChangeHandler}
+                autoComplete="off"
               />
             </div>
+          </div>
+          {pickupLocation.length > 2 && destinationLocation.length > 2 && (
+            <Button
+              title={"Search"}
+              loading={loading}
+              fun={() => {
+                getDistanceAndFare(pickupLocation, destinationLocation);
+              }}
+            />
+          )}
 
-            {/* Vehicle Card */}
-            <div className="bg-gray-50 rounded-xl p-4 flex justify-between items-center">
-              <div>
-                <h3 className="font-bold text-gray-800">
-                  {captain?.vehicle?.number}
-                </h3>
-                <p className="text-sm text-gray-500 flex items-center gap-2">
-                  <span className="capitalize">{captain?.vehicle?.color}</span>
-                  <span>•</span>
-                  <span className="flex items-center gap-1">
-                    <User size={14} />
-                    {captain?.vehicle?.capacity}
-                  </span>
-                </p>
-              </div>
-              <div className="w-16 h-16">
-                {captain?.vehicle?.type === "car" ? (
-                  <Car size={64} className="text-gray-700" />
-                ) : (
-                  <Bike size={64} className="text-gray-700" />
-                )}
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          <div className="w-full h-full overflow-y-scroll ">
+            {locationSuggestion.length > 0 && (
+              <LocationSuggestions
+                suggestions={locationSuggestion}
+                setSuggestions={setLocationSuggestion}
+                setPickupLocation={setPickupLocation}
+                setDestinationLocation={setDestinationLocation}
+                input={selectedInput}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
-      {/* New Ride Panel */}
-      <NewRide
-        rideData={newRide}
-        otp={otp}
-        setOtp={setOtp}
-        showBtn={showBtn}
-        showPanel={showNewRidePanel}
-        setShowPanel={setShowNewRidePanel}
-        showPreviousPanel={setShowCaptainDetailsPanel}
+      {/* Select Vehicle Panel */}
+      <SelectVehicle
+        selectedVehicle={setSelectedVehicle}
+        showPanel={showSelectVehiclePanel}
+        setShowPanel={setShowSelectVehiclePanel}
+        showPreviousPanel={setShowFindTripPanel}
+        showNextPanel={setShowRideDetailsPanel}
+        fare={fare}
+      />
+
+      {/* Ride Details Panel */}
+      <RideDetails
+        pickupLocation={pickupLocation}
+        destinationLocation={destinationLocation}
+        selectedVehicle={selectedVehicle}
+        fare={fare}
+        showPanel={showRideDetailsPanel}
+        setShowPanel={setShowRideDetailsPanel}
+        showPreviousPanel={setShowSelectVehiclePanel}
+        createRide={createRide}
+        cancelRide={cancelRide}
         loading={loading}
-        acceptRide={acceptRide}
-        verifyOTP={verifyOTP}
-        endRide={endRide}
-        isOnline={isOnline}
+        rideCreated={rideCreated}
+        confirmedRideData={confirmedRideData}
       />
     </div>
   );
 }
 
-// Helper Component
-const StatCard = ({ value, label, icon, color }) => (
-  <div className={`${color} p-3 rounded-xl flex flex-col items-center`}>
-    <div className="flex items-center gap-1">
-      {icon}
-      <span className="font-bold">{value}</span>
-    </div>
-    <span className="text-xs mt-1">{label}</span>
-  </div>
-);
-
-export default CaptainHomeScreen;
+export default UserHomeScreen;
