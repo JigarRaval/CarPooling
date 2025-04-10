@@ -4,7 +4,7 @@ import React from "react";
 const vehicles = [
   {
     id: 1,
-    name: "CarPoolingGo",
+    name: "Car",
     description: "Affordable, compact rides",
     type: "car",
     image: "car.png",
@@ -20,7 +20,7 @@ const vehicles = [
   },
   {
     id: 3,
-    name: "CarPoolingAuto",
+    name: "Auto",
     description: "Affordable, auto rides",
     type: "auto",
     image: "auto.webp",
